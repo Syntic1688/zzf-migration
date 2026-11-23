@@ -1,0 +1,24 @@
+# Daten des Altsystems und alles, was daraus entsteht (enthält Kunden- und Lieferantendaten)
+HM9/
+HM9BACK/
+*.DBF
+*.dbf
+*.zip
+*.csv
+*.json
+*.xlsx
+*.pdf
+zwischenspeicher/
+umgewandelt/
+archiv/
+pruefung/
+ergebnisse/
+
+# Zugangsdaten und Protokolle
+api_key.txt
+.env
+*.log
+
+# Python
+__pycache__/
+*.pyc
