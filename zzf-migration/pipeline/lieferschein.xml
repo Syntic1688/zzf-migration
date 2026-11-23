@@ -1,0 +1,87 @@
+<t t-name="zzf.lieferschein">
+  <t t-call="web.html_container">
+    <!-- Zusatzfeld für den chinesischen Kundennamen über seine Bezeichnung finden: Mit Studio angelegt, erhält es einen anderen technischen Namen -->
+    <t t-set="feld_zh" t-value="([n for n, d in docs.env['res.partner'].with_context(lang='de_DE').fields_get(attributes=['string']).items() if d['string'] == 'Chinesischer Name'] or [False])[0]"/>
+    <t t-foreach="docs" t-as="o">
+      <t t-set="waehrung" t-value="o.company_id.currency_id"/>
+      <t t-set="kunde" t-value="o.partner_id.commercial_partner_id"/>
+      <t t-set="kunde_zh" t-value="feld_zh and kunde[feld_zh]"/>
+      <t t-set="din" t-value="o.company_id.external_report_layout_id.key == 'l10n_din5008.external_layout_din5008'"/>
+      <t t-set="zeilen" t-value="o.move_ids.filtered(lambda m: m.state != 'cancel' and m.product_uom_qty)"/>
+      <t t-set="einheit_von" t-value="lambda m: m.uom_id if 'uom_id' in m._fields else m.product_uom"/>
+      <t t-set="menge_von" t-value="lambda m: m.quantity if o.state == 'done' else m.product_uom_qty"/>
+      <t t-set="preis_von" t-value="lambda m: m.sale_line_id.price_unit * (1 - (m.sale_line_id.discount or 0.0) / 100.0) if m.sale_line_id else 0.0"/>
+      <t t-set="satz_von" t-value="lambda m: sum(m.sale_line_id.tax_ids.filtered(lambda t: t.amount_type == 'percent').mapped('amount')) / 100.0"/>
+      <t t-set="netto" t-value="sum([menge_von(m) * preis_von(m) for m in zeilen])"/>
+      <t t-set="steuer" t-value="sum([menge_von(m) * preis_von(m) * satz_von(m) for m in zeilen])"/>
+      <t t-set="gewicht" t-value="sum([einheit_von(m)._compute_quantity(menge_von(m), m.product_id.uom_id) * m.product_id.weight for m in zeilen])"/>
+      <!-- Anschrift mit beiden Kundennamen (Standardlayout; das Layout nach DIN 5008 setzt die Anschrift selbst) -->
+      <t t-set="address">
+          <div><strong t-field="kunde.name"/></div>
+          <div t-if="kunde_zh and kunde_zh != kunde.name"><strong class="zzf_zh" t-out="kunde_zh"/></div>
+          <div t-if="kunde.street2" t-field="kunde.street2"/>
+          <div t-field="kunde.street"/>
+          <div><span t-field="kunde.zip"/> <span t-field="kunde.city"/></div>
+        </t>
+        <t t-set="layout_document_title">Lieferschein <span class="zzf_zh">送货单</span> <span t-field="o.name"/></t>
+        <t t-set="din5008_document_title">Lieferschein <span class="zzf_zh">送货单</span> <span t-field="o.name"/></t>
+        <t t-set="din5008_document_information">
+          <div class="information_block">
+            <table>
+              <tr t-if="kunde.ref"><td>Kunde:</td><td><span t-field="kunde.ref"/></td></tr>
+              <tr t-if="kunde_zh and kunde_zh != kunde.name"><td><span class="zzf_zh">中文名</span>:</td><td><strong class="zzf_zh" t-out="kunde_zh"/></td></tr>
+              <tr><td>Datum:</td><td><span t-out="o.date_done or o.scheduled_date" t-options="{'widget': 'date'}"/></td></tr>
+              <tr t-if="o.origin"><td>Auftrag:</td><td><span t-field="o.origin"/></td></tr>
+            </table>
+          </div>
+        </t>
+      <t t-call="web.external_layout" o="o" address="address" layout_document_title="layout_document_title" din5008_document_title="din5008_document_title" din5008_document_information="din5008_document_information">
+        <div class="page">
+          <!-- chinesische Texte in einer Schrift für vereinfachtes Chinesisch -->
+          <style>.zzf_zh { font-family: 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif; }</style>
+          <div t-if="not din" class="mb-3" name="kopf">
+            <span t-if="kunde.ref">Kunde <span t-field="kunde.ref"/> · </span>
+            Datum <span t-out="o.date_done or o.scheduled_date" t-options="{'widget': 'date'}"/>
+            <span t-if="o.origin"> · Auftrag <span t-field="o.origin"/></span>
+          </div>
+          <table class="table table-sm" name="positionen">
+            <thead>
+              <tr>
+                <th>Art.-Nr.</th>
+                <th>Bezeichnung</th>
+                <th class="text-end">Menge</th>
+                <th>Einheit</th>
+                <th class="text-end">Preis</th>
+                <th class="text-end">Betrag</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr t-foreach="zeilen" t-as="m">
+                <t t-set="name_de" t-value="m.product_id.with_context(lang='de_DE').name"/>
+                <t t-set="name_zh" t-value="m.product_id.with_context(lang='zh_CN').name"/>
+                <td t-out="m.product_id.default_code"/>
+                <td><span t-out="name_de"/><t t-if="name_zh != name_de"><span class="zzf_zh ms-2" t-out="name_zh"/></t></td>
+                <td class="text-end" t-out="('%.3f' % menge_von(m)).rstrip('0').rstrip('.').replace('.', ',')"/>
+                <td t-out="einheit_von(m).with_context(lang='de_DE').name"/>
+                <td class="text-end" t-out="preis_von(m)" t-options="{'widget': 'monetary', 'display_currency': waehrung}"/>
+                <td class="text-end" t-out="menge_von(m) * preis_von(m)" t-options="{'widget': 'monetary', 'display_currency': waehrung}"/>
+              </tr>
+            </tbody>
+          </table>
+          <div class="row" style="page-break-inside: avoid;">
+            <div class="col-6" name="gewicht">
+              <strong>Gesamtgewicht <span class="zzf_zh">总重量</span>: <span t-out="('%.2f' % gewicht).replace('.', ',')"/> kg</strong>
+            </div>
+            <div class="col-6">
+              <table class="table table-sm" name="summen" style="page-break-inside: avoid;">
+                <tr><td>Netto</td><td class="text-end" t-out="netto" t-options="{'widget': 'monetary', 'display_currency': waehrung}"/></tr>
+                <tr><td>Umsatzsteuer</td><td class="text-end" t-out="steuer" t-options="{'widget': 'monetary', 'display_currency': waehrung}"/></tr>
+                <tr><td><strong>Gesamt</strong></td><td class="text-end"><strong t-out="netto + steuer" t-options="{'widget': 'monetary', 'display_currency': waehrung}"/></td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+      </t>
+    </t>
+  </t>
+</t>
